@@ -1,9 +1,16 @@
 import os
 
-for setname in ['train', 'test']:
-    root = '/media/tunguyen/Devs/MtaAV_stuff/VAE/assembly/data/asm_final/{}'.format(setname)
+# for setname in ['train', 'test']:
+#     root = '/media/tunguyen/Devs/MtaAV_stuff/VAE/assembly/data/asm_final/{}'.format(setname)
 
-    for lbl in os.listdir(root):
+if True:
+    root = '../../MTAAV_data/asm_final'
+    setname = ''
+
+    # for lbl in os.listdir(root):
+    if True:
+        lbl = 'game_Linh'
+    	
         all = []
         for filename in os.listdir(root+'/'+lbl):
             path = root+'/'+lbl+'/'+filename

@@ -20,114 +20,47 @@ Differences from original article:
 """
 
 import numpy as np
-import data_helpers
-from w2v import train_word2vec
+np.random.seed(0)
 
 from keras.models import Sequential, Model
 from keras.layers import Dense, Dropout, Flatten, Input, MaxPooling1D, Convolution1D, Embedding
 from keras.layers.merge import Concatenate
-from keras.datasets import imdb
-from keras.preprocessing import sequence
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.models import load_model
-np.random.seed(0)
+from sklearn.metrics import classification_report, confusion_matrix #, plot_confusion_matrix
+import matplotlib.pyplot as plt
+from pre_define import *
 
-# ---------------------- Parameters section -------------------
-#
-# Model type. See Kim Yoon's Convolutional Neural Networks for Sentence Classification, Section 3
-model_type = "CNN-non-static"  # CNN-rand|CNN-non-static|CNN-static
 
-# Data source
-data_source = "local_dir"  # keras_data_set|local_dir
+import os
 
-# Model Hyperparameters
-embedding_dim = 50
-filter_sizes = (3, 8)
-num_filters = 10
-dropout_prob = (0.5, 0.8)
-hidden_dims = 50
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" #(or "1" or "2")
+
+# Fixed error Could not create cudnn handle: CUDNN_STATUS_INTERNAL_ERROR
+import tensorflow as tf
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+sess = tf.Session(config=config)
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+        print(len(gpus), 'Physical GPUs,', len(logical_gpus), 'Logical GPUs')
+    except RuntimeError as e:
+        # Memory growth must be set before GPUs have been initialized
+        print(e)
+
+
 
 # Training parameters
 batch_size = 64
-num_epochs = 10
-
-# Prepossessing parameters
-sequence_length = 400
-max_words = 5000
-
-# Word2Vec parameters (see train_word2vec)
-min_word_count = 1
-context = 10
-
-#
-# ---------------------- Parameters end -----------------------
+num_epochs = 30
 
 
-# save np.load
-np_load_old = np.load
-# modify the default parameters of np.load
-np.load = lambda *a,**k: np_load_old(*a, allow_pickle=True, **k)
-
-def load_data(data_source):
-    assert data_source in ["keras_data_set", "local_dir"], "Unknown data source"
-    if data_source == "keras_data_set":
-        (x_train, y_train), (x_val, y_val) = imdb.load_data(num_words=max_words, start_char=None,
-                                                              oov_char=None, index_from=None)
-        x_train = sequence.pad_sequences(x_train, maxlen=sequence_length, padding="post", truncating="post")
-        x_val = sequence.pad_sequences(x_val, maxlen=sequence_length, padding="post", truncating="post")
-
-        vocabulary = imdb.get_word_index()
-        vocabulary_inv = dict((v, k) for k, v in vocabulary.items())
-        vocabulary_inv[0] = "<PAD/>"
-    else:
-        x, y, x_test, y_test, vocabulary, vocabulary_inv_list = data_helpers.load_data()
-        vocabulary_inv = {key: value for key, value in enumerate(vocabulary_inv_list)}
-        y = y.argmax(axis=1)
-        y_test = y_test.argmax(axis=1)
-
-        # Shuffle data
-        shuffle_indices = np.random.permutation(np.arange(len(y)))
-        x = x[shuffle_indices]
-        y = y[shuffle_indices]
-        train_len = int(len(x) * 0.9)
-        x_train = x[:train_len]
-        y_train = y[:train_len]
-        x_val = x[train_len:]
-        y_val = y[train_len:]
-
-    return x_train, y_train, x_val, y_val, x_test, y_test, vocabulary_inv
-
-
-# Data Preparation
-print("Load data...")
-x_train, y_train, x_val, y_val, x_test, y_test, vocabulary_inv = load_data(data_source)
-
-print('sequence_length', sequence_length)
-print('x_val.shape', x_val.shape)
-if sequence_length != x_val.shape[1]:
-    print("Adjusting sequence length for actual size")
-    sequence_length = x_val.shape[1]
-
-print("x_train shape:", x_train.shape)
-print("x_val shape:", x_val.shape)
-print("x_test shape:", x_test.shape)
-print("Vocabulary Size: {:d}".format(len(vocabulary_inv)))
-
-# Prepare embedding layer weights and convert inputs for static model
-print("Model type is", model_type)
-if model_type in ["CNN-non-static", "CNN-static"]:
-    embedding_weights = train_word2vec(np.vstack((x_train, x_val)), vocabulary_inv, num_features=embedding_dim,
-                                       min_word_count=min_word_count, context=context)
-    if model_type == "CNN-static":
-        x_train = np.stack([np.stack([embedding_weights[word] for word in sentence]) for sentence in x_train])
-        x_val = np.stack([np.stack([embedding_weights[word] for word in sentence]) for sentence in x_val])
-        print("x_train static shape:", x_train.shape)
-        print("x_val static shape:", x_val.shape)
-
-elif model_type == "CNN-rand":
-    embedding_weights = None
-else:
-    raise ValueError("Unknown model type")
 
 # Build model
 if model_type == "CNN-static":
@@ -178,48 +111,91 @@ model.summary()
 
 
 # Train the model
-# es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=50)
-# mc = ModelCheckpoint('output/asm_best_model.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=True)
-# model.fit(x_train, y_train, batch_size=batch_size, epochs=num_epochs,
-#           validation_data=(x_val, y_val), callbacks=[es, mc], verbose=2)
-# model.save('output/model.h5')
+es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=50)
+# mc = ModelCheckpoint('output/cnn_best.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=True)
+mc = ModelCheckpoint('output/cnn_best.h5', monitor='val_loss', mode='min', verbose=1, save_best_only=True)
+model.fit(x_train, y_train, batch_size=batch_size, epochs=num_epochs, validation_data=(x_val, y_val), callbacks=[es, mc], verbose=2)
+model.save('output/model_cnn.h5')
+
 
 # Evaluate
-model = load_model('output/model.h5')
+model = load_model('output/cnn_best.h5')
 # model.evaluate(x_test, y_test, verbose=1)
+
+
 
 # Predict
 def pred(x, y):
     preds = model.predict(x)
     y_preds = np.array([1 if pred[0] > 0.5 else 0 for pred in preds])
-    # print('y', y)
     # print('preds', preds)
+    # print('y', y)
     # print('y_preds', y_preds)
+
     acc = np.sum(y == y_preds)
     total = len(y)
     print('acc', acc, 'total', total, acc/total)
-    # # far
-    # tot_bgn = np.sum(y == 0)
-    # false_bgn = np.sum([(y and 0) and (y_preds or y)] == 0)
-    # print('false_bgn', false_bgn, 'tot_bgn', tot_bgn, false_bgn/tot_bgn)
-    # # tpr
-    # tot_mal = np.sum(y == 1)
-    # correct_mal = np.sum([(y and 1) and (y_preds and y)] == 1)
-    # print('correct_mal', correct_mal, 'tot_mal', tot_mal, correct_mal/tot_mal)
 
     tot_bgn = np.sum(y == 0)
     tot_mal = np.sum(y == 1)
 
-    tpr = 0
-    far = 0
-    for k,v in enumerate(y):
-        # print(k, y[k], v)
-        if v == 1 and y_preds[k] == 1:
-            tpr += 1
-        if v == 0 and y_preds[k] == 1:
-            far += 1
-    print('tpr', tpr, 'tot_mal', tot_mal, tpr/tot_mal)
-    print('far', far, 'tot_bgn', tot_bgn, far/tot_bgn)
+    # # far
+    # false_bgn = np.sum([(y != y_preds) and (y == 1) and (y_preds == 0)])
+    # print('false_bgn', false_bgn, 'tot_bgn', tot_bgn, false_bgn/tot_bgn)
+    # # tpr
+    # correct_mal = np.sum([(y and 1) and (y_preds and y)] == 1)
+    # print('correct_mal', correct_mal, 'tot_mal', tot_mal, correct_mal/tot_mal)
+
+    # tpr = 0
+    # far = 0
+    # for k,v in enumerate(y):
+    #     # print(k, y[k], v)
+    #     if v == 1 and y_preds[k] == 1:
+    #         tpr += 1
+    #     if v == 0 and y_preds[k] == 1:
+    #         far += 1
+    # print('tpr', tpr, 'tot_mal', tot_mal, tpr/tot_mal)
+    # print('far', far, 'tot_bgn', tot_bgn, far/tot_bgn)
+
+
+    print('Confusion Matrix')
+    C = confusion_matrix(y, y_preds)
+    Cm = C.astype('float') / C.sum(axis=1)[:, np.newaxis]
+    print(C)
+    print('C.astype(np.float).sum(axis=1)', C.astype(np.float).sum(axis=1))
+    print(Cm)
+    # print('Classification Report')
+    # print(classification_report(y, y_preds))
+
+    # titles_options = [("Confusion matrix, without normalization", None),
+    #                     ("Normalized confusion matrix", 'true')]
+    # for title, normalize in titles_options:
+    #     disp = plot_confusion_matrix(model, x, y,
+    #                                     display_labels=[0,1],
+    #                                     # cmap=plt.cm.Blues,
+    #                                     normalize=normalize)
+    #     disp.ax_.set_title(title)
+
+    #     print(title)
+    #     print(disp.confusion_matrix)
+
+    # plt.show()
+
+
+    # labels = ['benign', 'malware']
+    # cm = confusion_matrix(y, y_preds)
+    # print(cm)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # cax = ax.matshow(cm)
+    # plt.title('Confusion matrix of the classifier')
+    # fig.colorbar(cax)
+    # ax.set_xticklabels([''] + labels)
+    # ax.set_yticklabels([''] + labels)
+    # plt.xlabel('Predicted')
+    # plt.ylabel('True')
+    # plt.show()
+
 
 x = np.concatenate((x_train, x_val))
 y = np.concatenate((y_train, y_val))

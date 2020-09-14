@@ -37,6 +37,10 @@ nosetests.xml
 
 *.swp
 .idea
-weights_file
-models/50features_1minwords_10context
-models/100features_1minwords_10context
+
+data/*
+models/*
+data
+model
+output
+

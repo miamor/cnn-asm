@@ -38,17 +38,17 @@ def clean_str(string):
     return string.strip().lower()
 
 
-def load_data_and_labels():
+def load_data_and_labels(train_pos_txt_path, train_neg_txt_path, test_pos_txt_path, test_neg_txt_path):
     """
     Loads MR polarity data from files, splits the data into words and generates labels.
     Returns split sentences and labels.
     """
     # Load (train) data from files
     # positive_examples = list(open("./data/rt-polarity.pos", encoding='latin-1').readlines())
-    positive_examples = list(open("./data/malware_train.txt", encoding='latin-1').readlines())
+    positive_examples = list(open(train_pos_txt_path, encoding='latin-1').readlines())
     positive_examples = [s.strip() for s in positive_examples]
     # negative_examples = list(open("./data/rt-polarity.neg", encoding='latin-1').readlines())
-    negative_examples = list(open("./data/benign_train.txt", encoding='latin-1').readlines())
+    negative_examples = list(open(train_neg_txt_path, encoding='latin-1').readlines())
     negative_examples = [s.strip() for s in negative_examples]
 
     # Split by words
@@ -63,9 +63,9 @@ def load_data_and_labels():
 
 
     # Load (test) data from files
-    _positive_examples = list(open("./data/malware_test.txt", encoding='latin-1').readlines())
+    _positive_examples = list(open(test_pos_txt_path, encoding='latin-1').readlines())
     _positive_examples = [s.strip() for s in _positive_examples]
-    _negative_examples = list(open("./data/benign_test.txt", encoding='latin-1').readlines())
+    _negative_examples = list(open(test_neg_txt_path, encoding='latin-1').readlines())
     _negative_examples = [s.strip() for s in _negative_examples]
     # Split by words
     _x_text = _positive_examples + _negative_examples
@@ -87,11 +87,19 @@ def pad_sentences(sentences, padding_word="<PAD/>", sequence_length=None):
     if sequence_length is None:
         sequence_length = max(len(x) for x in sentences)
     padded_sentences = []
+    # print('[pad_sentences] sequence_length', sequence_length)
     for i in range(len(sentences)):
         sentence = sentences[i]
-        num_padding = sequence_length - len(sentence)
-        new_sentence = sentence + [padding_word] * num_padding
-        padded_sentences.append(new_sentence)
+        # print('[pad_sentences] sentence', sentence, sequence_length, len(sentence))
+        if sequence_length > len(sentence):
+            num_padding = sequence_length - len(sentence)
+            new_sentence = sentence + [padding_word] * num_padding
+            # print('[pad_sentences] (pad) new_sentence', new_sentence, len(new_sentence))
+            padded_sentences.append(new_sentence)
+        else:
+            new_sentence = sentence[:sequence_length]
+            # print('[pad_sentences] (trim) new_sentence', new_sentence, len(new_sentence))
+            padded_sentences.append(new_sentence)
     return padded_sentences, sequence_length
 
 
@@ -141,21 +149,25 @@ def load_data_():
     return [x, y, vocabulary, vocabulary_inv]
 
 
-def load_data():
+def load_data(train_pos_txt_path, train_neg_txt_path, test_pos_txt_path, test_neg_txt_path, sequence_length=None):
     """
     Loads and preprocessed data for the MR dataset.
     Returns input vectors, labels, vocabulary, and inverse vocabulary.
     """
     # Load and preprocess data
-    sentences, labels, sentences_test, labels_test = load_data_and_labels()
-    sentences_padded, sequence_length = pad_sentences(sentences)
+    sentences, labels, sentences_test, labels_test = load_data_and_labels(train_pos_txt_path, train_neg_txt_path, test_pos_txt_path, test_neg_txt_path)
+    sentences_padded, sequence_length = pad_sentences(sentences,sequence_length=sequence_length)
     sentences_test_padded, _ = pad_sentences(sentences_test, sequence_length=sequence_length)
 
     vocabulary, vocabulary_inv = build_vocab(sentences_padded)
     x, y = build_input_data(sentences_padded, labels, vocabulary)
     x_test, y_test = build_input_data(sentences_test_padded, labels_test, vocabulary)
-    print('x', x, y.shape)
-    print('x_test', x_test, y_test.shape)
+
+    # x = np.array(x)
+    # x_test = np.array(x_test)
+
+    print('x', len(x[0]), y.shape)
+    print('x_test', x_test.shape, y_test.shape)
 
     return [x, y, x_test, y_test, vocabulary, vocabulary_inv]
 

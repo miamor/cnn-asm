@@ -13,8 +13,7 @@ Differences from original article:
 """
 
 import numpy as np
-import data_helpers
-from w2v import train_word2vec
+np.random.seed(0)
 
 from keras.models import Sequential, Model
 from keras.layers import Dense, Dropout, Flatten, Input, MaxPooling1D, Convolution1D, LSTM, Embedding
@@ -24,107 +23,26 @@ from keras.preprocessing import sequence
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.models import load_model
 from keras.optimizers import SGD
-np.random.seed(0)
+from sklearn.metrics import classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+from pre_define import *
 
-# ---------------------- Parameters section -------------------
-#
-# Model type. See Kim Yoon's Convolutional Neural Networks for Sentence Classification, Section 3
-model_type = "CNN-non-static"  # CNN-rand|CNN-non-static|CNN-static
+import os
 
-# Data source
-data_source = "keras_data_set"  # keras_data_set|local_dir
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" #(or "1" or "2")
 
-# Model Hyperparameters
-embedding_dim = 50
-filter_sizes = (8,8)
-dropout_prob = (0.2, 0.3)
-hidden_dims = 8
+
 
 # Training parameters
-batch_size = 32
-num_epochs = 30
+batch_size = 64
+num_epochs = 80
 
-# Prepossessing parameters
-sequence_length = 100
-max_words = 1000
-
-# Word2Vec parameters (see train_word2vec)
-min_word_count = 1
-context = 10
-
-#
-# ---------------------- Parameters end -----------------------
-
-
-# save np.load
-np_load_old = np.load
-# modify the default parameters of np.load
-np.load = lambda *a,**k: np_load_old(*a, allow_pickle=True, **k)
-
-def load_data(data_source):
-    assert data_source in ["keras_data_set", "local_dir"], "Unknown data source"
-    if data_source == "keras_data_set":
-        (x_train, y_train), (x_val, y_val) = imdb.load_data(num_words=max_words, start_char=None,
-                                                              oov_char=None, index_from=None)
-        x_train = sequence.pad_sequences(x_train, maxlen=sequence_length, padding="post", truncating="post")
-        x_val = sequence.pad_sequences(x_val, maxlen=sequence_length, padding="post", truncating="post")
-
-        vocabulary = imdb.get_word_index()
-        vocabulary_inv = dict((v, k) for k, v in vocabulary.items())
-        vocabulary_inv[0] = "<PAD/>"
-
-        return x_train, y_train, x_val, y_val, x_val, y_val, vocabulary_inv
-    else:
-        x, y, x_test, y_test, vocabulary, vocabulary_inv_list = data_helpers.load_data()
-        vocabulary_inv = {key: value for key, value in enumerate(vocabulary_inv_list)}
-        y = y.argmax(axis=1)
-        y_test = y_test.argmax(axis=1)
-
-        # Shuffle data
-        shuffle_indices = np.random.permutation(np.arange(len(y)))
-        x = x[shuffle_indices]
-        y = y[shuffle_indices]
-        train_len = int(len(x) * 0.9)
-        x_train = x[:train_len]
-        y_train = y[:train_len]
-        x_val = x[train_len:]
-        y_val = y[train_len:]
-
-        return x_train, y_train, x_val, y_val, x_test, y_test, vocabulary_inv
-
-
-# Data Preparation
-print("Load data...")
-x_train, y_train, x_val, y_val, x_test, y_test, vocabulary_inv = load_data(data_source)
-
-print('sequence_length', sequence_length)
-print('x_val.shape', x_val.shape)
-if sequence_length != x_val.shape[1]:
-    print("Adjusting sequence length for actual size")
-    sequence_length = x_val.shape[1]
-
-print("x_train shape:", x_train.shape)
-print("x_val shape:", x_val.shape)
-print("x_test shape:", x_test.shape)
-print("Vocabulary Size: {:d}".format(len(vocabulary_inv)))
-
-# Prepare embedding layer weights and lstmert inputs for static model
-print("Model type is", model_type)
-if model_type in ["CNN-non-static", "CNN-static"]:
-    embedding_weights = train_word2vec(np.vstack((x_train, x_val)), vocabulary_inv, num_features=embedding_dim,
-                                       min_word_count=min_word_count, context=context)
-    if model_type == "CNN-static":
-        x_train = np.stack([np.stack([embedding_weights[word] for word in sentence]) for sentence in x_train])
-        x_val = np.stack([np.stack([embedding_weights[word] for word in sentence]) for sentence in x_val])
-        print("x_train static shape:", x_train.shape)
-        print("x_val static shape:", x_val.shape)
-
-else:
-    raise ValueError("Unknown model type")
+dropout_prob = (0.3, 0.4)
+hidden_dims = 16
 
 
 # Build model
-
 if model_type == "CNN-static":
     input_shape = (sequence_length, embedding_dim)
 else:
@@ -140,13 +58,7 @@ else:
 
 z = Dropout(dropout_prob[0])(z)
 
-# Convolutional block
-# lstm_blocks = []
-# for sz in filter_sizes:
-#     # LSTM(intermediate_dim, return_sequences=False)(encode_sentence)
-#     lstm = LSTM(sz)(z)
-#     lstm_blocks.append(lstm)
-# z = Concatenate()(lstm_blocks) if len(lstm_blocks) > 1 else lstm_blocks[0]
+z = LSTM(8, return_sequences=True)(z)
 z = LSTM(8)(z)
 
 z = Dropout(dropout_prob[1])(z)
@@ -156,13 +68,13 @@ z = Dense(hidden_dims, activation="relu")(z)
 intermediate_dim = 16
 timesteps = 10
 
-input = Input(shape=(timesteps, len(vocabulary_inv), embedding_dim,))
+model_input = Input(shape=(sequence_length, embedding_dim))
 
 # LSTM encoding
-lstm = LSTM(intermediate_dim, input_shape=(len(vocabulary_inv), embedding_dim))(input)
-lstm = LSTM(intermediate_dim, return_sequences=False)(lstm)
-
-z = Dense(intermediate_dim)(lstm)
+z = LSTM(intermediate_dim, return_sequences=True)(model_input)
+z = LSTM(intermediate_dim, return_sequences=False)(z)
+z = Dropout(dropout_prob[1])(z)
+# z = Dense(intermediate_dim)(z)
 '''
 
 model_output = Dense(1, activation="sigmoid")(z)
@@ -181,19 +93,28 @@ if model_type == "CNN-non-static":
     embedding_layer.set_weights([weights])
 
 
-model.summary()
+print("x_train shape:", x_train.shape)
+
 
 
 # Train the model
 es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=50)
-mc = ModelCheckpoint('output/asm_best_model_lstm.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=True)
-model.fit(x_train, y_train, batch_size=batch_size, epochs=num_epochs,
-          validation_data=(x_val, y_val), callbacks=[es, mc], verbose=2)
-model.save('output/model_lstm.h5')
+# mc = ModelCheckpoint('output/lstm_best.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=True)
+mc = ModelCheckpoint('output/lstm_best.h5', monitor='val_loss', mode='min', verbose=1, save_best_only=True)
+# model.fit(x_train, y_train, batch_size=batch_size, epochs=num_epochs, validation_data=(x_val, y_val), callbacks=[es, mc], verbose=2)
+# model.save('output/model_lstm.h5')
+
+
+
 
 # Evaluate
-model = load_model('output/model_lstm.h5')
+model = load_model('output/lstm_best.h5')
 # model.evaluate(x_test, y_test, verbose=1)
+
+model.summary()
+
+
+
 
 # Predict
 def pred(x, y):
@@ -205,6 +126,8 @@ def pred(x, y):
     acc = np.sum(y == y_preds)
     total = len(y)
     print('acc', acc, 'total', total, acc/total)
+
+
     # # far
     # tot_bgn = np.sum(y == 0)
     # false_bgn = np.sum([(y and 0) and (y_preds or y)] == 0)
@@ -214,19 +137,45 @@ def pred(x, y):
     # correct_mal = np.sum([(y and 1) and (y_preds and y)] == 1)
     # print('correct_mal', correct_mal, 'tot_mal', tot_mal, correct_mal/tot_mal)
 
-    tot_bgn = np.sum(y == 0)
-    tot_mal = np.sum(y == 1)
+    # tot_bgn = np.sum(y == 0)
+    # tot_mal = np.sum(y == 1)
 
-    tpr = 0
-    far = 0
-    for k,v in enumerate(y):
-        # print(k, y[k], v)
-        if v == 1 and y_preds[k] == 1:
-            tpr += 1
-        if v == 0 and y_preds[k] == 1:
-            far += 1
-    print('tpr', tpr, 'tot_mal', tot_mal, tpr/tot_mal)
-    print('far', far, 'tot_bgn', tot_bgn, far/tot_bgn)
+    # tpr = 0
+    # far = 0
+    # for k,v in enumerate(y):
+    #     # print(k, y[k], v)
+    #     if v == 1 and y_preds[k] == 1:
+    #         tpr += 1
+    #     if v == 0 and y_preds[k] == 1:
+    #         far += 1
+    # print('tpr', tpr, 'tot_mal', tot_mal, tpr/tot_mal)
+    # print('far', far, 'tot_bgn', tot_bgn, far/tot_bgn)
+
+    print('Confusion Matrix')
+    C = confusion_matrix(y, y_preds)
+    Cm = C.astype('float') / C.sum(axis=1)[:, np.newaxis]
+    print(C)
+    print('C.astype(np.float).sum(axis=1)', C.astype(np.float).sum(axis=1))
+    print(Cm)
+    # print('Classification Report')
+    # print(classification_report(y, y_preds))
+
+
+    # labels = ['benign', 'malware']
+    # cm = confusion_matrix(y, y_preds)
+    # print(cm)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # cax = ax.matshow(cm)
+    # plt.title('Confusion matrix of the classifier')
+    # fig.colorbar(cax)
+    # ax.set_xticklabels([''] + labels)
+    # ax.set_yticklabels([''] + labels)
+    # plt.xlabel('Predicted')
+    # plt.ylabel('True')
+    # plt.show()
+
+
 
 x = np.concatenate((x_train, x_val))
 y = np.concatenate((y_train, y_val))
