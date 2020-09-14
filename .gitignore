@@ -44,3 +44,4 @@ data
 model
 output
 __pycache__
+venv
